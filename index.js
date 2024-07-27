@@ -117,34 +117,38 @@ function setVolume(volumeLevel) {
     req.write(payloadToSend);
     req.end();
 
-    process.stdout.write("Trying to set Volume to " + volumeLevel + "%");
+    process.stdout.write("Trying to set Volume to " + volumeLevel + "%\n");
   });
 }
 
 /**
  * Get Volume of Devialet Speaker
- * @returns {Promise} Returns current volume level
+ * @returns {Promise<number>} Returns current volume level
  */
 function getVolume() {
   return new Promise(function (resolve, reject) {
     var http_options = {
-      method: "POST",
-      path: "/Control/LibRygelRenderer/RygelRenderingControl",
       hostname: devialetDevice.host,
-      port: devialetDevice.port,
+      port: 80,
+      // port: devialetDevice.port, // port for the API is now always 80
+      path: "/ipcontrol/v1/systems/current/sources/current/soundControl/volume",
+      method: "GET",
       headers: {
-        "Content-Type": "text/xml",
-        SOAPACTION: "urn:schemas-upnp-org:service:RenderingControl:2#GetVolume",
-        "Content-Length": 350,
+        "Content-Type": "application/json",
       },
     };
 
     var req = http.request(http_options, (res) => {
+      let data = "";
       res.setEncoding("utf8");
 
-      res.on("data", (data) => {
-        resolve(data);
-        console.log(data);
+      res.on("data", (incomingData) => {
+        data += incomingData;
+      });
+
+      res.on("end", () => {
+        const volume = JSON.parse(data).volume;
+        resolve(volume);
       });
     });
 
@@ -154,7 +158,7 @@ function getVolume() {
     });
     req.end();
 
-    process.stdout.write("Trying to get Volume");
+    process.stdout.write("Trying to get Volume...\n");
   });
 }
 
@@ -219,20 +223,16 @@ function create_http_server() {
           }
         );
       } else if (q.setVolume == "up") {
-        if (!clientMedia) return res.end("Volume Up & Down not available");
-
-        clientMedia.getVolume(function (err, volume) {
-          if (err)
-            res.end(
-              '<p style="color:red;">Error, unable to get current volume:' +
-                err +
-                "</p>"
-            );
-          volume =
-            volume + config.volume_step > 100
-              ? 100
-              : volume + config.volume_step;
-          setVolume(volume).then(
+        getVolume()
+          .then(function (volume) {
+            volume =
+              volume + config.volume_step > 100
+                ? 100
+                : volume + config.volume_step;
+            return volume;
+          })
+          .then(setVolume)
+          .then(
             function (volumeLevel) {
               res.end(
                 "<h5>Volume successfully set to " + volumeLevel + "%</h5>"
@@ -245,21 +245,23 @@ function create_http_server() {
                   "%</p>"
               );
             }
-          );
-        });
+          )
+          .catch(function (err) {
+            res.end(
+              '<p style="color:red;">Error, unable to get current volume:' +
+                JSON.stringify(err, null, 2) +
+                "</p>"
+            );
+          });
       } else if (q.setVolume == "down") {
-        if (!clientMedia) return res.end("Volume Up & Down not available");
-
-        clientMedia.getVolume(function (err, volume) {
-          if (err)
-            res.end(
-              '<p style="color:red;">Error, unable to get current volume:' +
-                err +
-                "</p>"
-            );
-          volume =
-            volume - config.volume_step < 0 ? 0 : volume - config.volume_step;
-          setVolume(volume).then(
+        getVolume()
+          .then(function (volume) {
+            volume =
+              volume - config.volume_step < 0 ? 0 : volume - config.volume_step;
+            return volume;
+          })
+          .then(setVolume)
+          .then(
             function (volumeLevel) {
               res.end(
                 "<h5>Volume successfully set to " + volumeLevel + "%</h5>"
@@ -272,19 +274,27 @@ function create_http_server() {
                   "%</p>"
               );
             }
-          );
-        });
-      } else if (q.getVolume) {
-        clientMedia.getVolume(function (err, volume) {
-          if (err)
+          )
+          .catch(function (err) {
             res.end(
               '<p style="color:red;">Error, unable to get current volume:' +
-                err +
+                JSON.stringify(err, null, 2) +
                 "</p>"
             );
-          console.log("Volume: " + volume);
-          res.end("<h5>Volume: " + volume + "%</h5>");
-        });
+          });
+      } else if (q.getVolume) {
+        getVolume()
+          .then(function (volume) {
+            console.log("Volume: " + volume);
+            res.end("<h5>Volume: " + volume + "%</h5>");
+          })
+          .catch(function (err) {
+            res.end(
+              '<p style="color:red;">Error, unable to get current volume:' +
+                JSON.stringify(err, null, 2) +
+                "</p>"
+            );
+          });
       } else if (q.play) {
         if (q.play.length < 5) {
           clientMedia.play(function (err, result) {
